@@ -108,7 +108,7 @@ pub(crate) fn swap_hex(byte: u8) -> u8 {
 }
 
 pub(crate) fn bucket_quartiles(buckets: &[u32;256]) -> (u32, u32, u32) {
-    let mut _buckets = buckets.clone();
+    let mut _buckets = *buckets;
     _buckets.sort();
 
     // The quartiles are located 25% through the sorted array, 50% through the sorted array, and

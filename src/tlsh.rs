@@ -62,7 +62,7 @@ impl Tlsh {
         // Step 4: Construct the digest body
         // First we generate 2-bit values, then pack them into bytes
         let bucketbits = buckets.map(|b| {
-            if b <= q1 { 0b00 as u8 }
+            if b <= q1 { 0b00_u8 }
             else if b <= q2 { 0b01 }
             else if b <= q3 { 0b10 }
             else { 0b11 }
