@@ -1,0 +1,3 @@
+[toolchain]
+# Note: nightly channel required for fuzzing
+channel = "nightly"
