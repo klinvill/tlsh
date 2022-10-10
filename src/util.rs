@@ -1,4 +1,5 @@
 use std::ops::{BitAnd, BitXor};
+use crate::tlsh::Tlsh;
 
 // Pearson's sample random table (used for TLSH implementation)
 const V_TABLE: [u8;256] = [
@@ -160,16 +161,122 @@ pub(crate) fn l_capturing(data_len: usize) -> u8 {
     int_result.to_le_bytes()[0]
 }
 
-pub(crate) fn q1q2_ratio(q1: u32, q2: u32, q3: u32) -> u8 {
+pub(crate) fn q1_ratio(q1: u32, q3: u32) -> u8 {
     // The C++ TLSH implementation casts everything to float for this operation.
-    let q1_ratio: u8 = (((q1 * 100) as f32 / q3 as f32) % 16.0) as u8;
-    let q2_ratio: u8 = (((q2 * 100) as f32 / q3 as f32) % 16.0) as u8;
+    (((q1 * 100) as f32 / q3 as f32) % 16.0) as u8
+}
 
+pub(crate) fn q2_ratio(q2: u32, q3: u32) -> u8 {
+    // The C++ TLSH implementation casts everything to float for this operation.
+    (((q2 * 100) as f32 / q3 as f32) % 16.0) as u8
+}
+
+pub(crate) fn pack_q1q2_ratio(q1_ratio: u8, q2_ratio: u8) -> u8 {
     // actual header byte uses the first four bits from q1 and the next four bits from q2
     q1_ratio.checked_shl(4).unwrap()
         .bitxor(
             q2_ratio.bitand(0xf)
         )
+}
+
+pub(crate) fn unpack_q1q2_ratio(q1q2_ratio: u8) -> (u8, u8) {
+    // actual header byte uses the first four bits from q1 and the next four bits from q2
+    let q1_ratio = q1q2_ratio / 16;
+    let q2_ratio = q1q2_ratio % 16;
+
+    (q1_ratio, q2_ratio)
+}
+
+// Expects bitpairs to contain 4 bitpairs that only use the lower 2 bits (e.g. have the value 0, 1,
+// 2, or 3).
+pub(crate) fn pack_bitpairs(bitpairs: &[u8]) -> u8 {
+    assert_eq!(bitpairs.len(), 4);
+    // The TLSH C++ implementation appears to pack 4 buckets into a byte in reverse order, so
+    // the buckets b1, b2, b3, b4 would be packed into a byte as: [b4, b3, b2, b1]. E.g. if
+    // b1=00, b2=01, b3=10, b4=11, the resulting byte would be 11100100.
+    bitpairs[0].bitxor(
+        bitpairs[1].checked_shl(2).unwrap().bitxor(
+            bitpairs[2].checked_shl(4).unwrap().bitxor(
+                bitpairs[3].checked_shl(6).unwrap())))
+}
+
+pub(crate) fn unpack_bitpairs(byte: u8) -> [u8;4] {
+    let b1 = byte.bitand(0b00000011);
+    let b2 = byte.bitand(0b00001100).checked_shr(2).unwrap();
+    let b3 = byte.bitand(0b00110000).checked_shr(4).unwrap();
+    let b4 = byte.checked_shr(6).unwrap();
+    [b1, b2, b3, b4]
+}
+
+// The C++ TLSH implementation uses unsigned ints for the arguments and a signed int for the return
+// type.
+fn mod_diff(x: u32, y: u32, r: u32) -> i32 {
+    if y > x {
+        std::cmp::min(
+            (y - x) as i32,
+            (x + r - y) as i32
+        )
+    } else {
+        std::cmp::min(
+            (x - y) as i32,
+            (y + r - x) as i32
+        )
+    }
+}
+
+// The C++ TLSH implementation uses a signed integer for the header distance
+pub(crate) fn header_distance(x: &Tlsh, y: &Tlsh) -> i32 {
+    let mut diff = 0;
+
+    let ldiff = mod_diff(x.log_len as u32, y.log_len as u32, 256) as i32;
+    if ldiff <= 1 {
+        diff += ldiff;
+    } else {
+        diff += ldiff * 12;
+    }
+    println!("X len: {}, Y len: {}", x.log_len, y.log_len);
+    println!("Distance after len: {diff}");
+
+    let q1diff = mod_diff(x.q1_ratio as u32, y.q1_ratio as u32, 16) as i32;
+    if q1diff <= 1 {
+        diff += q1diff;
+    } else {
+        diff += (q1diff - 1) * 12;
+    }
+    println!("Distance after q1ratio: {diff}");
+
+    let q2diff = mod_diff(x.q2_ratio as u32, y.q2_ratio as u32, 16) as i32;
+    if q2diff <= 1 {
+        diff += q2diff;
+    } else {
+        diff += (q2diff - 1) * 12;
+    }
+    println!("Distance after q2ratio: {diff}");
+
+    if x.checksum != y.checksum {
+        diff += 1;
+    }
+    println!("Distance after checksum: {diff}");
+
+    diff
+}
+
+// The C++ TLSH implementation uses a signed integer for the body distance
+pub(crate) fn body_distance(x: &Tlsh, y: &Tlsh) -> i32 {
+    let mut diff = 0;
+
+    for (bx, by) in x.body.iter().zip(y.body.iter()) {
+        for (bpx, bpy) in unpack_bitpairs(*bx).iter().zip(unpack_bitpairs(*by).iter()) {
+            let d = u8::abs_diff(*bpx, *bpy) as i32;
+            if d == 3 {
+                diff += 6;
+            } else {
+                diff += d;
+            }
+        }
+    }
+
+    diff
 }
 
 
@@ -268,10 +375,30 @@ mod tests {
 
     #[test]
     fn test_q1q2_ratio() {
-        assert_eq!(q1q2_ratio(16, 16, 1), 0);
-        assert_eq!(q1q2_ratio(0, 0, 1), 0);
+        assert_eq!(q1_ratio(16, 1), 0);
+        assert_eq!(q2_ratio(16, 1), 0);
+        assert_eq!(q1_ratio(0, 1), 0);
+        assert_eq!(q2_ratio(0, 1), 0);
 
         // Expected q1 ratio is 13, expected q2 ratio is 15. The result is them packed into a byte.
-        assert_eq!(q1q2_ratio(5, 7, 4), 13u8.checked_shl(4).unwrap().bitxor(15));
+        assert_eq!(q1_ratio(5, 4), 13);
+        assert_eq!(q2_ratio(7, 4), 15);
+        assert_eq!(
+            pack_q1q2_ratio(
+                q1_ratio(5, 4),
+                q2_ratio(7, 4)
+            ), 13u8.checked_shl(4).unwrap().bitxor(15)
+        );
+
+        // Should also be able to unpack the byte
+        assert_eq!(
+            unpack_q1q2_ratio(13u8.checked_shl(4).unwrap().bitxor(15)),
+            (13, 15)
+        )
+    }
+
+    #[test]
+    fn test_mod_diff() {
+        assert_eq!(mod_diff(15, 3, 16), 4);
     }
 }

@@ -1,17 +1,18 @@
-use std::ops::BitXor;
-use crate::util::{bucket_counts, bucket_quartiles, checksum, l_capturing, q1q2_ratio, swap_hex};
+use crate::util::{bucket_counts, bucket_quartiles, checksum, l_capturing, q1_ratio, q2_ratio, pack_q1q2_ratio, swap_hex, header_distance, body_distance, unpack_q1q2_ratio, pack_bitpairs};
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct Tlsh {
     // The TLSH hash has been updated to include a version prefix, typically the string "T1"
     version: String,
 
     // Header components:
-    checksum: u8,
-    log_len: u8,
-    q1q2_ratio: u8,
+    pub(crate) checksum: u8,
+    pub(crate) log_len: u8,
+    pub(crate) q1_ratio: u8,
+    pub(crate) q2_ratio: u8,
 
     // Body components:
-    body: [u8;64],
+    pub(crate) body: [u8;64],
 }
 
 impl Tlsh {
@@ -25,7 +26,12 @@ impl Tlsh {
 
     /// Converts a TLSH hash to its string representation
     pub(crate) fn encode(&self) -> String {
-        let digest_header = [self.checksum, self.log_len, self.q1q2_ratio];
+        // For a reason that is unclear to me, TLSH seems to swap the hex digits of only its checksum
+        // and log_len header values.
+        let checksum = swap_hex(self.checksum);
+        let log_len = swap_hex(self.log_len);
+        let q1q2_ratio = pack_q1q2_ratio(self.q1_ratio, self.q2_ratio);
+        let digest_header = [checksum, log_len, q1q2_ratio];
         let mut hex: Vec<String> = digest_header.iter()
             // The TLSH C++ implementation also appears to list the bytes for the body in reverse order
             .chain(self.body.iter().rev())
@@ -37,6 +43,65 @@ impl Tlsh {
         hex.insert(0, self.version.clone());
 
         hex.join("")
+    }
+
+    pub(crate) fn decode(digest: &str) -> Option<Self> {
+        let header_bytes = 3;
+        let body_bytes = 64;
+        let version_len = 2;
+
+        // The header and body are hex encoded, so each byte is encoded as 2 characters
+        if digest.len() != (header_bytes + body_bytes) * 2 + version_len {
+            return None;
+        }
+
+        fn decode_hex_byte(b: &[u8]) -> Option<u8> {
+            match u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16) {
+                Ok(x) => Some(x),
+                _ => None,
+            }
+        }
+
+        let version = &digest[..version_len];
+        let digest_header_bytes: Vec<u8> = digest[version_len..version_len + header_bytes*2].as_bytes()
+            .chunks_exact(2)
+            .map(decode_hex_byte)
+            .collect::<Option<Vec<u8>>>()?;
+        // The TLSH C++ implementation also appears to list the bytes for the body in reverse order
+        let digest_body_bytes = digest[version_len + header_bytes*2..].as_bytes()
+            .chunks_exact(2)
+            .rev()
+            .map(decode_hex_byte)
+            .collect::<Option<Vec<u8>>>()?;
+
+        // For a reason that is unclear to me, TLSH seems to swap the hex digits of only its checksum
+        // and log_len header values.
+        let checksum = swap_hex(digest_header_bytes[0]);
+        let log_len = swap_hex(digest_header_bytes[1]);
+        let q1q2_ratio = digest_header_bytes[2];
+        let (q1_ratio, q2_ratio) = unpack_q1q2_ratio(q1q2_ratio);
+
+        let body: [u8; 64] = match (digest_body_bytes).try_into() {
+            Ok(bytes) => Some(bytes),
+            _ => None,
+        }?;
+
+        Some(Tlsh {
+            version: version.to_string(),
+            checksum,
+            log_len,
+            q1_ratio,
+            q2_ratio,
+            body,
+        })
+    }
+
+    pub(crate) fn diff(&self, other: &Tlsh) -> i32 {
+        let header_diff = header_distance(self, other);
+        let body_diff = body_distance(self, other);
+        println!("Header distance: {header_diff}");
+        println!("Body distance: {body_diff}");
+        header_diff + body_diff
     }
 
     fn tlsh_impl(data: &[u8], window_size: usize) -> Self {
@@ -53,11 +118,10 @@ impl Tlsh {
         let (q1, q2, q3) = bucket_quartiles(&buckets);
 
         // Step 3: Construct the digest header
-        // For a reason that is unclear to me, TLSH seems to swap the hex digits of only its checksum
-        // and log_len header values.
-        let checksum = swap_hex(checksum(data, window_size));
-        let log_len = swap_hex(l_capturing(data.len()));
-        let quartile_header = q1q2_ratio(q1, q2, q3);
+        let checksum = checksum(data, window_size);
+        let log_len = l_capturing(data.len());
+        let q1_ratio = q1_ratio(q1, q3);
+        let q2_ratio = q2_ratio(q2, q3);
 
         // Step 4: Construct the digest body
         // First we generate 2-bit values, then pack them into bytes
@@ -67,22 +131,31 @@ impl Tlsh {
             else if b <= q3 { 0b10 }
             else { 0b11 }
         });
-        let body = bucketbits.chunks_exact(4).map(|bitpairs| {
-            // The TLSH C++ implementation appears to pack 4 buckets into a byte in reverse order, so
-            // the buckets b1, b2, b3, b4 would be packed into a byte as: [b4, b3, b2, b1]. E.g. if
-            // b1=00, b2=01, b3=10, b4=11, the resulting byte would be 11100100.
-            bitpairs[0].bitxor(
-                bitpairs[1].checked_shl(2).unwrap().bitxor(
-                    bitpairs[2].checked_shl(4).unwrap().bitxor(
-                        bitpairs[3].checked_shl(6).unwrap())))
-        });
+        let body = bucketbits.chunks_exact(4).map(pack_bitpairs);
 
         Tlsh {
             version: "T1".to_string(),
             checksum,
             log_len,
-            q1q2_ratio: quartile_header,
+            q1_ratio,
+            q2_ratio,
             body: body.collect::<Vec<u8>>().try_into().unwrap()
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn test_encode_decode(data in prop::collection::vec(0..u8::MAX, 0..10000)) {
+            let hash = Tlsh::from_data(&data);
+            let enc_dec = Tlsh::decode(&hash.encode()).unwrap();
+            prop_assert_eq!(enc_dec, hash);
         }
     }
 }
