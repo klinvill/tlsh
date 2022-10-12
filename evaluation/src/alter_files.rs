@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 use rand::prelude::*;
 
-struct AlteredText {
+pub(crate) struct AlteredText {
     text: Vec<char>,
 
     rng: ThreadRng,
@@ -12,7 +12,7 @@ struct AlteredText {
 }
 
 impl AlteredText {
-    fn new(text: Vec<char>) -> Self {
+    pub(crate) fn new(text: Vec<char>) -> Self {
         let rng = thread_rng();
         let dict = std::fs::read_to_string("/usr/share/dict/words")
             .expect("Expected to read dictionary from /usr/share/dict/words")
@@ -27,12 +27,16 @@ impl AlteredText {
         }
     }
 
-    fn from_file(file: &Path) -> io::Result<Self> {
+    pub(crate) fn from_file(file: &Path) -> io::Result<Self> {
         let text = std::fs::read_to_string(file)?.chars().collect();
         Ok(AlteredText::new(text))
     }
 
-    fn permute(&mut self, times: usize) {
+    pub(crate) fn text(&self) -> &Vec<char> {
+        &self.text
+    }
+
+    pub(crate) fn permute(&mut self, times: usize) {
         // Randomly select one of the possible permutations
         let operations = [
             AlteredText::insert_word,
