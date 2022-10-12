@@ -234,8 +234,6 @@ pub(crate) fn header_distance(x: &Tlsh, y: &Tlsh) -> i32 {
     } else {
         diff += ldiff * 12;
     }
-    println!("X len: {}, Y len: {}", x.log_len, y.log_len);
-    println!("Distance after len: {diff}");
 
     let q1diff = mod_diff(x.q1_ratio as u32, y.q1_ratio as u32, 16) as i32;
     if q1diff <= 1 {
@@ -243,7 +241,6 @@ pub(crate) fn header_distance(x: &Tlsh, y: &Tlsh) -> i32 {
     } else {
         diff += (q1diff - 1) * 12;
     }
-    println!("Distance after q1ratio: {diff}");
 
     let q2diff = mod_diff(x.q2_ratio as u32, y.q2_ratio as u32, 16) as i32;
     if q2diff <= 1 {
@@ -251,12 +248,10 @@ pub(crate) fn header_distance(x: &Tlsh, y: &Tlsh) -> i32 {
     } else {
         diff += (q2diff - 1) * 12;
     }
-    println!("Distance after q2ratio: {diff}");
 
     if x.checksum != y.checksum {
         diff += 1;
     }
-    println!("Distance after checksum: {diff}");
 
     diff
 }

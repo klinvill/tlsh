@@ -99,8 +99,6 @@ impl Tlsh {
     pub(crate) fn diff(&self, other: &Tlsh) -> i32 {
         let header_diff = header_distance(self, other);
         let body_diff = body_distance(self, other);
-        println!("Header distance: {header_diff}");
-        println!("Body distance: {body_diff}");
         header_diff + body_diff
     }
 
