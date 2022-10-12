@@ -36,7 +36,8 @@ impl AlteredText {
         &self.text
     }
 
-    pub(crate) fn permute(&mut self, times: usize) {
+    // One TLSH evaluation experiment only performed these small permutations on 500 lines of text.
+    pub(crate) fn small_permute(&mut self, times: usize) {
         // Randomly select one of the possible permutations
         let operations = [
             AlteredText::insert_word,
@@ -45,6 +46,22 @@ impl AlteredText {
             AlteredText::substitute_words,
             AlteredText::replace_chars,
             AlteredText::delete_chars,
+        ];
+
+        for _ in 0..times {
+            let op = operations.choose(&mut self.rng).unwrap();
+            op(self);
+        }
+    }
+
+    // One TLSH evaluation experiment only performed these large permutations on full text files.
+    pub(crate) fn large_permute(&mut self, times: usize) {
+        let small_permute_40 = |s: &mut AlteredText| { s.small_permute(40) };
+        // Randomly select one of the possible larger permutations
+        let operations = [
+            small_permute_40,
+            AlteredText::swap_sections,
+            AlteredText::delete_lines,
         ];
 
         for _ in 0..times {
@@ -101,6 +118,43 @@ impl AlteredText {
         }
 
         c
+    }
+
+    // Tries to find the start and end indices for the string that contain num_lines lines that
+    // start after index i.
+    fn find_lines_after(&mut self, i: usize, num_lines: usize) -> (usize, usize) {
+        // Increment start index until we find a newline, then consider our line to start after that.
+        let mut start = i;
+        while start < self.text.len() && self.text[start] != '\n' {
+            start += 1;
+        }
+        // Try wrapping around if needed
+        if start >= self.text.len() {
+            start = 0;
+            while start < i && self.text[start] != '\n' {
+                start += 1;
+            }
+        }
+        // If we haven't found a newline, then the whole string is one line, swapping is irrelevant
+        if self.text[start] != '\n' {
+            return (0, self.text.len());
+        } else {
+            // We want to start with the line after the newline, so increment one more.
+            start += 1;
+        }
+
+        // Find the end index for the last line. We ignore wrapping around with the end index.
+        let mut lines_left = num_lines;
+        let mut end = start+1;
+        while lines_left > 0 && end < self.text.len() {
+            if self.text[end] == '\n' {
+                lines_left -= 1;
+            }
+            // We want an exclusive end index, so we increment after we've found our last newline.
+            end += 1;
+        }
+
+        (start, end)
     }
 
     fn insert_word(&mut self) -> () {
@@ -314,6 +368,65 @@ impl AlteredText {
             self.text.remove(*i);
         }
     }
+
+    /// Swaps two sections containing 5-25 adjacent lines
+    fn swap_sections(&mut self) {
+        // The TLSH evaluation restricted the number of lines that could be permuted to between 5
+        // and 25.
+        const SECTION_MIN_LINES: usize = 5;
+        const SECTION_MAX_LINES: usize = 25;
+
+        let num_lines = self.rng.gen_range(SECTION_MIN_LINES..SECTION_MAX_LINES);
+        let ri_1 = self.rng.gen_range(0..self.text.len());
+        let ri_2 = self.rng.gen_range(0..self.text.len());
+
+        let (start_1, end_1) = self.find_lines_after(ri_1, num_lines);
+        let (start_2, end_2) = self.find_lines_after(ri_2, num_lines);
+
+        self._swap_sections(start_1, end_1, start_2, end_2);
+    }
+
+    // Swaps two sections that are provided as a tuple of start index and end index
+    fn _swap_sections(&mut self, sec1_start: usize, sec1_end: usize, sec2_start: usize, sec2_end: usize) {
+        let sec1_len = sec1_end - sec1_start;
+        let sec2_len = sec2_end - sec2_start;
+
+        // When we copy sec2 over into sec1, it may change the indices for sec2. We need to keep
+        // track of that so we can copy sec1 into the right place.
+        let offset = sec2_len as i64 - sec1_len as i64;
+        let new_sec2_start;
+        let new_sec2_end;
+        if sec2_start > sec1_start {
+            if offset < 0 {
+                new_sec2_start = sec2_start - offset.abs() as usize;
+                new_sec2_end = sec2_end - offset.abs() as usize;
+            } else {
+                new_sec2_start = sec2_start + offset as usize;
+                new_sec2_end = sec2_end + offset as usize;
+            }
+        } else {
+            new_sec2_start = sec2_start;
+            new_sec2_end = sec2_end;
+        }
+
+        let sec1_copy: Vec<char> = self.text[sec1_start..sec1_end].iter().copied().collect();
+        let sec2_copy: Vec<char> = self.text[sec2_start..sec2_end].iter().copied().collect();
+
+        self.text.splice(sec1_start..sec1_end, sec2_copy);
+        self.text.splice(new_sec2_start..new_sec2_end, sec1_copy);
+    }
+
+    /// Deletes 5-25 adjacent lines
+    fn delete_lines(&mut self) {
+        const SECTION_MIN_LINES: usize = 5;
+        const SECTION_MAX_LINES: usize = 25;
+
+        let num_lines = self.rng.gen_range(SECTION_MIN_LINES..SECTION_MAX_LINES);
+        let ri = self.rng.gen_range(0..self.text.len());
+
+        let (start, end) = self.find_lines_after(ri, num_lines);
+        self.text.drain(start..end);
+    }
 }
 
 
@@ -484,6 +597,40 @@ mod tests {
 
             text._delete_chars(target, start, count);
             assert_eq!(text.text, reference_text.chars().collect::<Vec<char>>())
+        }
+    }
+
+    #[test]
+    fn test_swap_sections() {
+        let orig_text = "This is a first line.\n\
+            While this is the second line\n\
+            and this is the last one";
+        let sections_to_swap = [
+            ((52,76), (0,22)),  // Swap first and last sections
+            ((0,22), (52,76)),  // Swap first and last sections
+            ((22,52), (52,76)), // Swap second and last sections
+        ];
+        let expected_results = [
+            "and this is the last one\
+            While this is the second line\n\
+            This is a first line.\n",
+
+            "and this is the last one\
+            While this is the second line\n\
+            This is a first line.\n",
+
+            "This is a first line.\n\
+            and this is the last one\
+            While this is the second line\n",
+        ];
+
+        for (i, section) in sections_to_swap.iter().enumerate() {
+            let expected = expected_results[i];
+            let ((start_1, end_1), (start_2, end_2)) = *section;
+
+            let mut text = AlteredText::new(orig_text.chars().collect());
+            text._swap_sections(start_1, end_1, start_2, end_2);
+            assert_eq!(text.text, expected.chars().collect::<Vec<char>>())
         }
     }
 }
