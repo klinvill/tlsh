@@ -1,0 +1,6 @@
+evaluation/results/comparisons.csv filter=lfs diff=lfs merge=lfs -text
+evaluation/results/distinct_hashes.csv filter=lfs diff=lfs merge=lfs -text
+evaluation/results/linux_bins.csv filter=lfs diff=lfs merge=lfs -text
+evaluation/results/pg1342.csv filter=lfs diff=lfs merge=lfs -text
+evaluation/results/pg1342_500.csv filter=lfs diff=lfs merge=lfs -text
+evaluation/results/similar_hashes.csv filter=lfs diff=lfs merge=lfs -text
