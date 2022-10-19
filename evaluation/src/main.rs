@@ -7,6 +7,7 @@ use ssdeep;
 
 mod alter_files;
 mod collect_hashes;
+mod comparisons;
 
 // Runs experiment where the small permutations are performed on the first 500 lines of Pride and
 // Prejudice
@@ -88,4 +89,7 @@ fn main() {
     let similar_hashes_file = Path::new("results/similar_hashes.csv");
     collect_hashes::collect_hashes(&Path::new("data/linux_usr_bin"),distinct_hashes_file);
     collect_hashes::collect_hashes(&Path::new("data/malware"), similar_hashes_file);
+
+    // Computes similarity and difference scores for each combination of files
+    comparisons::comparison_experiment();
 }

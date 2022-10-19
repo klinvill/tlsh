@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 csv = "1.1.6"
 indicatif = "0.17.1"    # Used for progress bars
+itertools = "0.10.5"
 rand = "0.8.5"
 ssdeep = "0.2.0"
 tlsh = { path="../" }
