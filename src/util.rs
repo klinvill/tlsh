@@ -38,7 +38,6 @@ pub(crate) fn bucket_counts(data: &[u8], window_size: usize) -> [u32; 256] {
 
     // The TLSH C++ implementation looks to use the below salts for each window in order
     const SALTS: [u8; 21] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73];
-    // const SALTS: [u8; 21] = [49, 12, 178, 166, 84, 230, 197, 181, 80, 142, 200, 253, 101, 18, 222, 237, 214, 227, 22, 175, 5];
 
     if data.len() < window_size {
         // Too little data, ignore

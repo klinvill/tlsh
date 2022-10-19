@@ -103,6 +103,7 @@ impl Tlsh {
     }
 
     fn tlsh_impl(data: &[u8], window_size: usize) -> Self {
+        // Step 1: Populate array of bucket counts
         // Note: each bucket is defined to hold an unsigned int in the TLSH C++ implementation
         let buckets = bucket_counts(data, window_size);
 
