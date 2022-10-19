@@ -6,6 +6,7 @@ use tlsh;
 use ssdeep;
 
 mod alter_files;
+mod collect_hashes;
 
 // Runs experiment where the small permutations are performed on the first 500 lines of Pride and
 // Prejudice
@@ -80,4 +81,11 @@ fn large_experiment() {
 fn main() {
     small_experiment();
     large_experiment();
+
+    // Collects hashes from the malware payloads and linux bins. The resulting files are then
+    // manually annotated to record which files are similar
+    let distinct_hashes_file = Path::new("results/distinct_hashes.csv");
+    let similar_hashes_file = Path::new("results/similar_hashes.csv");
+    collect_hashes::collect_hashes(&Path::new("data/linux_usr_bin"),distinct_hashes_file);
+    collect_hashes::collect_hashes(&Path::new("data/malware"), similar_hashes_file);
 }
